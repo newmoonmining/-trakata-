@@ -6,7 +6,7 @@
 <title>newmoonmining</title>
 <style>
   :root {
-    --bg: #c1bcac;
+    --bg: #ffffff;
     --fg: #000000;
     --muted: #999999;
   }
@@ -146,6 +146,7 @@
   }
 
   .text .ch {
+    color: rgba(0, 0, 0, 0.1);
     position: absolute;
     left: 0;
     top: 0;
@@ -172,13 +173,27 @@
   .shadow {
     position: absolute;
     z-index: 0;
-    opacity: 0.5;
+    opacity: 0.1;
     pointer-events: none;
     font-family: Helvetica, Arial, sans-serif;
     font-size: calc(var(--fs, 22.8px) * 0.5);
     letter-spacing: 0.02em;
     line-height: 1;
     text-transform: uppercase;
+  }
+
+  .shadow.t3 {
+    font-size: calc(var(--fs, 22.8px) * 0.75);
+  }
+
+  /* Layers can be switched off with a tap */
+  body.hide-t2 .shadow.t2,
+  body.hide-t3 .shadow.t3 {
+    display: none;
+  }
+
+  body.hide-v1 #rain {
+    display: none;
   }
 
   .shadow .sh {
@@ -227,6 +242,15 @@
   }
 
 
+  #rain {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+    pointer-events: none;
+  }
+
   #lock {
     position: fixed;
     bottom: 1.25rem;
@@ -250,6 +274,7 @@
 </style>
 </head>
 <body>
+  <canvas id="rain"></canvas>
   <div id="scroller">
     <div id="stage"></div>
   </div>
@@ -450,6 +475,13 @@
       // Middle letters start scrambled, away from their slot, and drift. Vowels move at 1.5x speed
       items.forEach((it) => {
         if (it.fixed) return;
+        if (!it.vowel) {
+          // Consonants stay still, on their slot
+          it.x = it.slot;
+          it.v = 0;
+          it.slotted = true;
+          return;
+        }
         it.slotted = false;
         const speed = (SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN)) * (it.vowel ? 1.5 : 1) * (1.5 + Math.random() * 1.5) * 3; // each letter 150%-300% faster at random, then tripled
         it.v = (Math.random() < 0.5 ? -1 : 1) * speed;
@@ -471,32 +503,34 @@
       if (row) {
         row.querySelectorAll('.ghost, .shadow').forEach((g) => g.remove());
 
-        // Shadow: a half-size copy, centred on its row, moving on its own across the full page width
+        // Two shadow layers per word: t2 at half size, t3 at 75% size. Each is centred on its row and moves on its own.
         const page = stage.clientWidth;
-        const shadowH = el.offsetHeight / 2;
-        const shadow = document.createElement('div');
-        shadow.className = 'shadow';
-        shadow.style.left = (-el.offsetLeft) + 'px';
-        shadow.style.top = (el.offsetTop + (el.offsetHeight - shadowH) / 2) + 'px';
-        shadow.style.width = page + 'px';
-        shadow.style.height = shadowH + 'px';
-        const shadowLetters = items.map((it) => {
-          const sh = document.createElement('span');
-          sh.className = 'sh';
-          sh.textContent = it.el.textContent;
-          shadow.appendChild(sh);
-          return sh;
+        [{ cls: 't2', scale: 0.5 }, { cls: 't3', scale: 0.75 }].forEach((layer) => {
+          const shadowH = el.offsetHeight * layer.scale;
+          const shadow = document.createElement('div');
+          shadow.className = 'shadow ' + layer.cls;
+          shadow.style.left = (-el.offsetLeft) + 'px';
+          shadow.style.top = (el.offsetTop + (el.offsetHeight - shadowH) / 2) + 'px';
+          shadow.style.width = page + 'px';
+          shadow.style.height = shadowH + 'px';
+          const shadowLetters = items.map((it) => {
+            const sh = document.createElement('span');
+            sh.className = 'sh';
+            sh.textContent = it.el.textContent;
+            shadow.appendChild(sh);
+            return sh;
+          });
+          row.appendChild(shadow);
+          const parts = shadowLetters.map((sh) => {
+            const w = sh.offsetWidth;
+            const range = Math.max(0, page - w);
+            const speed = SHADOW_SPEED_MIN + Math.random() * (SHADOW_SPEED_MAX - SHADOW_SPEED_MIN);
+            const part = { el: sh, w: w, x: Math.random() * range, v: (Math.random() < 0.5 ? -1 : 1) * speed };
+            sh.style.left = part.x + 'px';
+            return part;
+          });
+          shadowStates.set(shadow, { parts: parts, W: page });
         });
-        row.appendChild(shadow);
-        const parts = shadowLetters.map((sh) => {
-          const w = sh.offsetWidth;
-          const range = Math.max(0, page - w);
-          const speed = SHADOW_SPEED_MIN + Math.random() * (SHADOW_SPEED_MAX - SHADOW_SPEED_MIN);
-          const part = { el: sh, w: w, x: Math.random() * range, v: (Math.random() < 0.5 ? -1 : 1) * speed };
-          sh.style.left = part.x + 'px';
-          return part;
-        });
-        shadowStates.set(shadow, { parts: parts, W: page });
 
         items.forEach((it) => {
           if (!it.vowel) return;
@@ -1061,6 +1095,99 @@
     window.addEventListener('resize', () => {
       fitFontSize();
       fitToScreen();
+    });
+
+    // Canvas and random glyphs for the falling letters
+    const rainCanvas = document.getElementById('rain');
+    const rctx = rainCanvas.getContext('2d');
+    const SCRIPTS = [
+      [0x0041, 0x005A], [0x0061, 0x007A], [0x0370, 0x03FF], [0x0400, 0x04FF], [0x0530, 0x058F],
+      [0x0590, 0x05FF], [0x0620, 0x064A], [0x0900, 0x097F], [0x0B80, 0x0BFF], [0x0E01, 0x0E3A],
+      [0x10A0, 0x10FF], [0x1200, 0x127F], [0x3041, 0x3096], [0x30A1, 0x30FA], [0x4E00, 0x4E7F],
+      [0xAC00, 0xAC7F]
+    ];
+    function randomGlyph() {
+      const [lo, hi] = SCRIPTS[Math.floor(Math.random() * SCRIPTS.length)];
+      return String.fromCodePoint(lo + Math.floor(Math.random() * (hi - lo + 1)));
+    }
+
+    // A constant stream of letters poured from above, wandering left or right.
+    // Each drop goes the same way as the last one 80% of the time.
+    const fallers = [];
+    const SPAWN_MS = 90;
+    const STEP = 14;
+    let nextSpawn = null;
+    let streamX = null;
+    let streamDir = 1;
+    // Half the size of the text on the page
+    function fallSize() {
+      const texts = [...document.querySelectorAll('.text')];
+      if (!texts.length) return 12;
+      const avg = texts.reduce((a, t) => a + parseFloat(getComputedStyle(t).fontSize), 0) / texts.length;
+      return avg / 2;
+    }
+    function spawnDrop() {
+      const mid = innerWidth / 2;
+      const limit = innerWidth * 0.1;
+      if (streamX === null) streamX = mid;
+      const dir = Math.random() < 0.8 ? streamDir : -streamDir;
+      streamX += dir * STEP;
+      let finalDir = dir;
+      if (streamX < mid - limit || streamX > mid + limit) {
+        streamX = Math.max(mid - limit, Math.min(mid + limit, streamX));
+        finalDir = -dir;
+      }
+      streamDir = finalDir;
+      fallers.push({ x: streamX, y: -20, v: 60, glyph: randomGlyph() });
+    }
+    function sizeRain() {
+      const dpr = window.devicePixelRatio || 1;
+      rainCanvas.width = innerWidth * dpr;
+      rainCanvas.height = innerHeight * dpr;
+      rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    function rainFrame(now) {
+      if (nextSpawn === null || now - nextSpawn > 1000) nextSpawn = now;
+      while (now >= nextSpawn) {
+        spawnDrop();
+        nextSpawn += SPAWN_MS;
+      }
+      const dt = rainFrame.last === undefined ? 0 : Math.min((now - rainFrame.last) / 1000, 0.05);
+      rainFrame.last = now;
+
+      rctx.clearRect(0, 0, innerWidth, innerHeight);
+      rctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      rctx.font = fallSize() + 'px Helvetica, Arial, sans-serif';
+      rctx.textAlign = 'center';
+      for (let i = fallers.length - 1; i >= 0; i--) {
+        const f = fallers[i];
+        f.v += 320 * dt; // accelerates as it falls, like poured water
+        f.y += f.v * dt;
+        if (f.y > innerHeight + 20) {
+          fallers.splice(i, 1);
+          continue;
+        }
+        rctx.fillText(f.glyph, f.x, f.y);
+      }
+      requestAnimationFrame(rainFrame);
+    }
+    sizeRain();
+    window.addEventListener('resize', sizeRain);
+    requestAnimationFrame(rainFrame);
+
+    // Tap anywhere (not a name, a download button or the lock) to switch one random layer on or off
+    const layerOn = { t2: true, t3: true, v1: true };
+    function applyLayers() {
+      document.body.classList.toggle('hide-t2', !layerOn.t2);
+      document.body.classList.toggle('hide-t3', !layerOn.t3);
+      document.body.classList.toggle('hide-v1', !layerOn.v1);
+    }
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#lock, .dl, .entry')) return;
+      const names = ['t2', 't3', 'v1'];
+      const pick = names[Math.floor(Math.random() * names.length)];
+      layerOn[pick] = !layerOn[pick];
+      applyLayers();
     });
 
     render();
