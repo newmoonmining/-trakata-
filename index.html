@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newmoonmining</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #000000;
+    --muted: #999999;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: Helvetica, Arial, sans-serif;
+  }
+
+  /* Scrolls down through the pages only */
+  #scroller {
+    height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Pages stack downwards. A faint line marks each page break */
+  #stage {
+    position: relative;
+    width: 80%;
+    margin: 0 auto;
+    height: 0;
+  }
+
+  /* Each column is a text box. It grows downwards as entries are added */
+  .box {
+    position: absolute;
+    width: 200px;
+    background: var(--bg);
+    border: 0;
+  }
+
+
+  /* Download buttons sit in a column on the right, one per list */
+  /* Labels are kept for screen readers and file names, but not shown.
+     Buttons stay hidden until every word is complete, then overlay their list. */
+  .dl {
+    position: absolute;
+    width: 200px;
+    height: 2.2rem;
+    background: transparent;
+    color: transparent;
+    border: 0;
+    padding: 0;
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 0.85rem;
+    cursor: pointer;
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.08s ease-out, background-color 0.08s ease-out;
+  }
+
+  /* Once every word is red, each list gets its download overlay */
+  .dl.ready {
+    visibility: visible;
+    pointer-events: auto;
+    border: 0;
+  }
+
+  /* Press: shrink 5% and turn lilac, springing back on release */
+  .dl:active {
+    transform: scale(0.95);
+    background: #c8a2c8;
+  }
+
+  /* Any draggable component: add class "draggable" and call attachDrag() */
+  .draggable {
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .draggable.dragging {
+    cursor: grabbing;
+    opacity: 0.6;
+  }
+
+  .entries {
+    padding: 0;
+  }
+
+  .entry {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-bottom: 0;
+    padding: 0 1rem;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .entry.dragging {
+    cursor: grabbing;
+  }
+
+  #lock:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  body.locked .entry {
+    cursor: default;
+  }
+
+  .entry.dragging .text {
+    opacity: 0.4;
+  }
+
+  /* Names: letters are positioned inside the word, which is the full row width */
+  .text {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    text-align: center;
+    text-transform: uppercase;
+    font-size: var(--fs, 22.8px);
+    letter-spacing: 0;
+    white-space: nowrap;
+    line-height: 1;
+    outline: none;
+    cursor: inherit;
+  }
+
+  .text.spread {
+    position: relative;
+  }
+
+  .text .ch {
+    position: absolute;
+    left: 0;
+    top: 0;
+    white-space: pre;
+    z-index: 3; /* moving right, frozen and ghosts sit on layer 3 */
+  }
+
+  .text .ch.vowel {
+    color: #ffffff;
+  }
+
+  /* Moving left: 5% smaller, temporarily */
+  .text .ch.left {
+    transform: scale(0.95);
+    z-index: 1; /* moving left */
+  }
+
+  /* Finished words are frozen on layer 3, back to normal size */
+  .text[data-done] .ch,
+  .text[data-done] .ch.left {
+    z-index: 3;
+    transform: none;
+  }
+
+  /* Shadow copy of each word: 10% opacity, not interactive, underneath everything */
+  .shadow {
+    position: absolute;
+    z-index: 0;
+    opacity: 0.5;
+    pointer-events: none;
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: calc(var(--fs, 22.8px) * 0.75);
+    letter-spacing: 0;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .shadow .sh {
+    position: absolute;
+    top: 0;
+    left: 0;
+    white-space: pre;
+    color: var(--fg);
+  }
+
+  /* Each vowel's ghost: background colour, lagging behind its vowel, always on top */
+  .ghost {
+    position: absolute;
+    pointer-events: none;
+    z-index: 3;
+    color: #c1bcac;
+    text-transform: uppercase;
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: var(--fs, 22.8px);
+    letter-spacing: 0;
+    line-height: 1;
+    white-space: pre;
+  }
+
+  /* The red copy that appears on the button when a word is completed */
+  .copy {
+    position: absolute;
+    visibility: visible;
+    pointer-events: none;
+    text-transform: uppercase;
+    font-size: var(--fs, 22.8px);
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  .copy .ch {
+    position: absolute;
+    left: 0;
+    top: 0;
+    white-space: pre;
+    color: #e00000;
+  }
+
+
+  #rain {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  #lock {
+    position: fixed;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg);
+    color: var(--fg);
+    border: 0;
+    outline: none;
+    padding: 0.4rem 1rem;
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 0.85rem;
+    letter-spacing: 0;
+    cursor: pointer;
+  }
+
+
+  body.locked .text {
+    cursor: default;
+  }
+</style>
+</head>
+<body>
+  <canvas id="rain"></canvas>
+  <div id="scroller">
+    <div id="stage"></div>
+  </div>
+  <button id="lock" type="button">lock</button>
+
+  <script>
+    // Starting layout: three boxes, 5 / 5 / 8 names, in list order
+    const DEFAULT_STATE = {
+      locked: true,
+      pages: 1,
+      layout: {},
+      compact: true,
+      auto: true,
+      boxes: [
+        { x: 0, y: 0, names: ['Empiria', 'Polari', 'Telemetry', 'Larrakin', 'Yokai'] },
+        { x: 400, y: 0, names: ['Think Tanks', 'Tanks', 'Dosa', 'Nekyia', 'Mantle'] },
+        { x: 800, y: 0, names: ['MUL.APIN', 'Aporia', 'Uruk', 'Samizdat', 'Simulacra', 'Anathema', 'Acinetobacter', 'Convalescent'] }
+      ]
+    };
+    const KEY = 'newmoon-boxes-v1';
+    const NEW_PAGE_ZONE = 160;    // a box this close to the bottom of the last page makes a new page
+    const BOX_W = 200;            // must match .box width in the CSS
+    const LABELS = ['AC-1 K5', 'AC-2 K5', 'AC-3 K5'];
+    const FOOTER = '::]';
+
+    const stage = document.getElementById('stage');
+    const lockBtn = document.getElementById('lock');
+
+    let state = load() || JSON.parse(JSON.stringify(DEFAULT_STATE));
+    let dragEntry = null; // the entry row being moved between or within boxes
+
+    function load() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(KEY));
+        if (saved && Array.isArray(saved.boxes)) {
+          saved.pages = saved.pages || 1;
+          saved.layout = saved.layout || {};
+          if (!saved.autoV2) {
+            saved.auto = true;
+          }
+          if (!saved.compact) {
+            saved.boxes.forEach((b, i) => {
+              b.x = i * 400;
+              b.y = 0;
+            });
+            saved.layout = {};
+            saved.compact = true;
+          }
+          return saved;
+        }
+      } catch (err) {}
+      return null;
+    }
+
+    // Read the page back into state and store it
+    function save() {
+      state = collect();
+      try {
+        localStorage.setItem(KEY, JSON.stringify(state));
+      } catch (err) {}
+      syncButtonHeights();
+      fitStageHeight();
+    }
+
+    function collect() {
+      return {
+        locked: state.locked,
+        pages: state.pages,
+        layout: state.layout,
+        compact: true,
+        auto: state.auto,
+        autoV2: true,
+        boxes: [...stage.querySelectorAll('.box')].map((box) => ({
+          x: box._x,
+          y: box._y,
+          names: [...box.querySelectorAll('.text')]
+            .map((t) => t.textContent.trim())
+            .filter((n) => n.length > 0)
+        }))
+      };
+    }
+
+    // Keep a box's left edge inside the visible width
+    function clampX(x) {
+      return Math.max(0, Math.min(Math.round(x), stage.clientWidth - BOX_W));
+    }
+
+    function setPages(count) {
+      state.pages = count;
+    }
+
+    // Stop the page exactly at the bottom of the lowest list or button
+    function fitStageHeight() {
+      let bottom = 0;
+      stage.querySelectorAll('.box, .dl').forEach((el) => {
+        bottom = Math.max(bottom, el.offsetTop + el.offsetHeight);
+      });
+      stage.style.height = bottom + 'px';
+    }
+
+    // Each name's letters drift left and right within the word.
+    // Edges and neighbouring letters bounce them back, both reversing.
+    const wordState = new Map();
+    const doneStates = new Map(); // finished words, kept so they can be re-laid out
+    const shadowStates = new Map(); // shadow copies, each moving on its own
+    const SHADOW_SPEED_MIN = 15;
+    const SHADOW_SPEED_MAX = 40;
+    const SPEED_MIN = 10; // px per second
+    const SPEED_MAX = 22;
+    const MIN_COMPLETE_MS = 20000; // a word can't complete until it has been moving this long
+
+    // Keep the plain text in dataset.raw and turn it into separate letters
+    function spreadText(el) {
+      const raw = el.textContent;
+      el.dataset.raw = raw;
+      el.classList.add('spread');
+      el.textContent = '';
+      [...raw].forEach((ch) => {
+        const letter = document.createElement('span');
+        letter.className = 'ch';
+        letter.textContent = ch;
+        el.appendChild(letter);
+      });
+    }
+
+    // Each word gets its own size. More letters = smaller, so all the rows fit the screen.
+    // A word is never wider than the page.
+    function fitFontSize() {
+      const rows = [...stage.querySelectorAll('.text')];
+      if (!rows.length) return;
+      const sample = document.createElement('span');
+      sample.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:100px;font-family:Helvetica,Arial,sans-serif;text-transform:uppercase;';
+      document.body.appendChild(sample);
+      const availH = window.innerHeight - 90;
+      const info = rows.map((t) => {
+        const letters = Math.max(1, t.textContent.length);
+        sample.textContent = t.textContent;
+        const availW = t.closest('.box').clientWidth - 32;
+        return { t: t, letters: letters, fsW: sample.offsetWidth ? (availW / sample.offsetWidth) * 100 : 40 };
+      });
+      sample.remove();
+
+      // Heights: size is inversely proportional to letter count, scaled so every row fits the screen height
+      const invSum = info.reduce((a, r) => a + 1 / r.letters, 0);
+      const scale = availH / invSum;
+      info.forEach((r) => {
+        const fs = Math.max(8, Math.min(r.fsW, scale / r.letters));
+        r.t.parentElement.style.setProperty('--fs', fs.toFixed(2) + 'px');
+      });
+    }
+
+    // Each name is a crossword row. Consonants stay in their slots.
+    // Vowels drift and drop into their own slot. Once every vowel is in place, the word completes.
+    function layoutWord(el) {
+      if (el.dataset.done) {
+        relayoutDone(el);
+        return;
+      }
+      if (!el.classList.contains('spread')) return;
+      const letters = [...el.querySelectorAll('.ch')];
+      if (!letters.length) {
+        wordState.delete(el);
+        return;
+      }
+      const W = el.clientWidth;
+      const widths = letters.map((l) => l.offsetWidth);
+      const free = Math.max(0, W - widths.reduce((a, b) => a + b, 0));
+      const weights = letters.slice(0, -1).map(() => 0.2 + Math.random() * 1.3);
+      const sumWeights = weights.reduce((a, b) => a + b, 0) || 1;
+
+      // Slots: where each letter belongs in the finished word
+      let x = 0;
+      const items = letters.map((l, i) => {
+        const vowel = /[aeiou]/i.test(l.textContent);
+        l.classList.toggle('vowel', vowel);
+        const fixed = false;
+        const item = { el: l, slot: x, x: x, w: widths[i], vowel: vowel, fixed: fixed, slotted: fixed, v: 0 };
+        if (i < weights.length) {
+          x += widths[i] + free * weights[i] / sumWeights;
+        }
+        return item;
+      });
+      if (letters.length === 1) {
+        items[0].slot = items[0].x = Math.max(0, (W - widths[0]) / 2);
+      }
+
+      // Middle letters start scrambled, away from their slot, and drift. Vowels move at 1.5x speed
+      items.forEach((it) => {
+        if (it.fixed) return;
+        it.slotted = false;
+        const speed = (SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN)) * (it.vowel ? 1.5 : 1) * (1.5 + Math.random() * 1.5) * 3; // each letter 150%-300% faster at random, then tripled
+        it.v = (Math.random() < 0.5 ? -1 : 1) * speed;
+        const range = Math.max(0, W - it.w);
+        let start = Math.random() * range;
+        for (let tries = 0; tries < 50 && Math.abs(start - it.slot) < 12; tries++) {
+          start = Math.random() * range;
+        }
+        it.x = start;
+      });
+
+      el.style.height = letters[0].offsetHeight + 'px';
+      items.forEach((it) => {
+        it.el.style.left = it.x + 'px';
+      });
+
+      // Ghost shadows sit in the row (not the name) so the name's text stays clean
+      const row = el.closest('.entry');
+      if (row) {
+        row.querySelectorAll('.ghost, .shadow').forEach((g) => g.remove());
+
+        // Shadow: a half-size copy, centred on its row, moving on its own across the full page width
+        const page = stage.clientWidth;
+        const shadowH = el.offsetHeight * 0.75;
+        const shadow = document.createElement('div');
+        shadow.className = 'shadow';
+        shadow.style.left = (-el.offsetLeft) + 'px';
+        shadow.style.top = (el.offsetTop + (el.offsetHeight - shadowH) / 2) + 'px';
+        shadow.style.width = page + 'px';
+        shadow.style.height = shadowH + 'px';
+        const shadowLetters = items.map((it) => {
+          const sh = document.createElement('span');
+          sh.className = 'sh';
+          sh.textContent = it.el.textContent;
+          shadow.appendChild(sh);
+          return sh;
+        });
+        row.appendChild(shadow);
+        const parts = shadowLetters.map((sh) => {
+          const w = sh.offsetWidth;
+          const range = Math.max(0, page - w);
+          const speed = SHADOW_SPEED_MIN + Math.random() * (SHADOW_SPEED_MAX - SHADOW_SPEED_MIN);
+          const part = { el: sh, w: w, x: Math.random() * range, v: (Math.random() < 0.5 ? -1 : 1) * speed };
+          sh.style.left = part.x + 'px';
+          return part;
+        });
+        shadowStates.set(shadow, { parts: parts, W: page });
+
+        items.forEach((it) => {
+          if (!it.vowel) return;
+          const g = document.createElement('span');
+          g.className = 'ghost';
+          g.textContent = it.el.textContent;
+          g.style.top = el.offsetTop + 'px';
+          g.style.left = (el.offsetLeft + it.x) + 'px';
+          row.appendChild(g);
+          it.ghost = g;
+          it.gx = it.x;
+        });
+      }
+      if (!el.dataset.start) el.dataset.start = String(performance.now());
+      wordState.set(el, { items, W, done: false, startedAt: Number(el.dataset.start) });
+    }
+
+    // The finished word on its button, spelled correctly
+    function createCopy(el, st) {
+      const box = el.closest('.box');
+      const boxes = [...stage.querySelectorAll('.box')];
+      const btn = stage.querySelectorAll('.dl')[boxes.indexOf(box)];
+      if (!btn) return;
+
+      const tRect = el.getBoundingClientRect();
+      const bRect = btn.getBoundingClientRect();
+      const copy = document.createElement('div');
+      copy.className = 'copy';
+      copy.style.left = (tRect.left - bRect.left - btn.clientLeft) + 'px';
+      copy.style.top = (tRect.top - bRect.top - btn.clientTop) + 'px';
+      copy.style.width = st.W + 'px';
+      copy.style.height = el.offsetHeight + 'px';
+      copy.style.fontSize = getComputedStyle(el).fontSize;
+
+      st.items.forEach((it) => {
+        const span = document.createElement('span');
+        span.className = 'ch' + (it.vowel ? ' vowel' : '');
+        span.textContent = it.el.textContent;
+        span.style.left = it.slot + 'px';
+        copy.appendChild(span);
+      });
+
+      btn.appendChild(copy);
+    }
+
+    function buttonFor(el) {
+      const box = el.closest('.box');
+      const boxes = [...stage.querySelectorAll('.box')];
+      return stage.querySelectorAll('.dl')[boxes.indexOf(box)] || null;
+    }
+
+    // Re-fit a finished word to its new width, keeping its gaps in proportion, then redraw its red copy
+    function relayoutDone(el) {
+      const st = doneStates.get(el);
+      const btn = buttonFor(el);
+      if (!st || !btn) return;
+
+      const W = el.clientWidth;
+      const items = st.items;
+      const n = items.length;
+      const widths = items.map((it) => it.el.offsetWidth);
+      const gaps = [];
+      for (let i = 0; i < n - 1; i++) {
+        gaps.push(Math.max(0, items[i + 1].slot - (items[i].slot + items[i].w)));
+      }
+      const sumGaps = gaps.reduce((a, b) => a + b, 0);
+      const newFree = Math.max(0, W - widths.reduce((a, b) => a + b, 0));
+
+      let x = 0;
+      items.forEach((it, i) => {
+        it.w = widths[i];
+        it.slot = x;
+        it.x = x;
+        it.el.style.left = x + 'px';
+        if (i < n - 1) {
+          const g = sumGaps > 0 ? gaps[i] * newFree / sumGaps : newFree / Math.max(1, n - 1);
+          x += widths[i] + g;
+        }
+      });
+      st.W = W;
+      el.style.height = items[0].el.offsetHeight + 'px';
+
+      const old = btn.querySelector('.copy');
+      if (old) old.remove();
+      createCopy(el, st);
+    }
+
+    // Every vowel is in place: freeze the black word and put the red one on its button
+    function completeWord(el, st) {
+      st.done = true;
+      doneStates.set(el, st);
+      el.dataset.done = '1';
+      el.contentEditable = 'false';
+      wordState.delete(el);
+      const row = el.closest('.entry');
+      if (row) row.querySelectorAll('.ghost, .shadow').forEach((g) => g.remove());
+      createCopy(el, st);
+      checkAllDone();
+    }
+
+    function layoutAll() {
+      for (const key of [...wordState.keys()]) {
+        if (key.classList.contains('text')) wordState.delete(key);
+      }
+      document.querySelectorAll('.text.spread').forEach(layoutWord);
+    }
+
+    // One frame of movement for every name
+    let lastFrame = null;
+    // Vowels move at 1.5x speed all the time
+    const vowelFactor = 1.5;
+
+    function animateWords(now) {
+      requestAnimationFrame(animateWords);
+      const dt = lastFrame === null ? 0 : Math.min((now - lastFrame) / 1000, 0.05);
+      lastFrame = now;
+
+      for (const [el, st] of [...wordState]) {
+        try {
+          moveWord(el, st, dt, now);
+        } catch (err) {
+          console.error('Word animation error:', err);
+        }
+      }
+
+      for (const [shadow, st] of [...shadowStates]) {
+        if (!shadow.isConnected) {
+          shadowStates.delete(shadow);
+          continue;
+        }
+        st.parts.forEach((p) => {
+          p.x += p.v * dt;
+          if (p.x < 0) {
+            p.x = 0;
+            p.v = -p.v;
+          }
+          if (p.x + p.w > st.W) {
+            p.x = st.W - p.w;
+            p.v = -p.v;
+          }
+          p.el.style.left = p.x.toFixed(1) + 'px';
+        });
+      }
+    }
+
+    function moveWord(el, st, dt, now) {
+      if (!el.isConnected) {
+        wordState.delete(el);
+        return;
+      }
+      const { items, W } = st;
+
+      // Every letter keeps moving and bounces off the sides of the box
+      items.forEach((it) => {
+        it.x += it.v * dt * (it.vowel ? vowelFactor : 1);
+        if (it.x < 0) {
+          it.x = 0;
+          it.v = -it.v;
+        }
+        if (it.x + it.w > W) {
+          it.x = W - it.w;
+          it.v = -it.v;
+        }
+      });
+
+      // Consonants bump each other, both reversing. Vowels pass straight through.
+      const consonants = items.filter((it) => !it.vowel);
+      for (let a = 0; a < consonants.length; a++) {
+        for (let b = a + 1; b < consonants.length; b++) {
+          let p = consonants[a];
+          let q = consonants[b];
+          if (p.x > q.x) [p, q] = [q, p];
+          const overlap = p.x + p.w - q.x;
+          if (overlap > 0 && p.v > q.v) {
+            p.v = -p.v;
+            q.v = -q.v;
+            p.x = Math.max(0, p.x - overlap / 2);
+            q.x = Math.min(W - q.w, q.x + overlap / 2);
+          }
+        }
+      }
+
+      items.forEach((it) => {
+        it.el.style.left = it.x.toFixed(1) + 'px';
+        if (it.ghost) {
+          it.gx += (it.x - it.gx) * Math.min(1, 5 * dt);
+          it.ghost.style.left = (el.offsetLeft + it.gx).toFixed(1) + 'px';
+        }
+        const movingLeft = it.v < 0;
+        if (movingLeft !== it.movingLeft) {
+          it.movingLeft = movingLeft;
+          it.el.classList.toggle('left', movingLeft);
+        }
+      });
+
+      // Complete only when every letter is on its slot in the same frame
+      if (el.classList.contains('text') && !st.done && now - st.startedAt >= MIN_COMPLETE_MS) {
+        const aligned = items.every((it) => Math.abs(it.x - it.slot) <= Math.max(3, Math.abs(it.v) * dt));
+        if (aligned) completeWord(el, st);
+      }
+    }
+    requestAnimationFrame(animateWords);
+
+    function makeEntry(name) {
+      // The whole row is the drag handle. Names can't be edited.
+      const row = document.createElement('div');
+      row.className = 'entry';
+
+      const text = document.createElement('div');
+      text.className = 'text';
+      text.textContent = name;
+      text.contentEditable = 'false';
+      text.spellcheck = false;
+      if (name) spreadText(text);
+
+      row.addEventListener('pointerdown', (e) => {
+        if (state.locked) return;
+        dragEntry = row;
+        row.classList.add('dragging');
+        row.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+
+      row.appendChild(text);
+      return row;
+    }
+
+    function makeBox(b) {
+      const box = document.createElement('section');
+      box.className = 'box';
+      box._x = clampX(b.x);
+      box._y = Math.max(0, Math.round(b.y));
+      box.style.left = box._x + 'px';
+      box.style.top = box._y + 'px';
+
+
+      const entries = document.createElement('div');
+      entries.className = 'entries';
+      b.names.forEach((n) => entries.appendChild(makeEntry(n)));
+
+      box.appendChild(entries);
+
+      return box;
+    }
+
+
+    // Each download button matches the height of its list box
+    function syncButtonHeights() {
+      const boxes = stage.querySelectorAll('.box');
+      stage.querySelectorAll('.dl').forEach((btn, i) => {
+        const box = boxes[i];
+        if (box) btn.style.height = Math.max(box.offsetHeight, 35) + 'px';
+      });
+    }
+
+    // Lists and buttons that can be placed on the page
+    function solidsFor(el) {
+      return [...stage.querySelectorAll('.box, .dl')].filter((o) => o !== el);
+    }
+
+    // Work out where a box or button should land.
+    // snap: true = magnetic edges while dragging; false = just stop overlaps
+    function placeMagnetic(el, x, y, snap) {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const others = solidsFor(el).map((o) => ({
+        x: o.offsetLeft, y: o.offsetTop, w: o.offsetWidth, h: o.offsetHeight
+      }));
+      const T = 12; // magnet strength in px
+
+      if (snap) {
+        let bestX = { d: T + 1, v: x };
+        let bestY = { d: T + 1, v: y };
+        for (const o of others) {
+          const nearV = y < o.y + o.h + T && y + h > o.y - T;
+          const nearH = x < o.x + o.w + T && x + w > o.x - T;
+          if (nearV) {
+            for (const c of [o.x - w, o.x + o.w, o.x]) {
+              const d = Math.abs(x - c);
+              if (d < bestX.d) bestX = { d, v: c };
+            }
+          }
+          if (nearH) {
+            for (const c of [o.y - h, o.y + o.h, o.y]) {
+              const d = Math.abs(y - c);
+              if (d < bestY.d) bestY = { d, v: c };
+            }
+          }
+        }
+        if (bestX.d <= T) x = bestX.v;
+        if (bestY.d <= T) y = bestY.v;
+      }
+
+      // Never overlap: push out of the shallowest side of anything in the way
+      for (let pass = 0; pass < 3; pass++) {
+        for (const o of others) {
+          const ox = Math.min(x + w, o.x + o.w) - Math.max(x, o.x);
+          const oy = Math.min(y + h, o.y + o.h) - Math.max(y, o.y);
+          if (ox > 0 && oy > 0) {
+            if (ox < oy) {
+              x = (x + w / 2 < o.x + o.w / 2) ? o.x - w : o.x + o.w;
+            } else {
+              y = (y + h / 2 < o.y + o.h / 2) ? o.y - h : o.y + o.h;
+            }
+          }
+        }
+      }
+
+      return {
+        x: Math.max(0, Math.min(Math.round(x), stage.clientWidth - w)),
+        y: Math.max(0, Math.round(y))
+      };
+    }
+
+    // Lay out every list with its button beside it, rows touching, pair centred
+    function autoLayout() {
+      const boxes = [...stage.querySelectorAll('.box')];
+      const btns = [...stage.querySelectorAll('.dl')];
+      const W = stage.clientWidth;
+      let y = 0;
+
+      boxes.forEach((box, i) => {
+        const bw = box._w || W;
+        box.style.width = bw + 'px';
+        box._x = 0;
+        box._y = y;
+        box.style.left = '0px';
+        box.style.top = y + 'px';
+
+        const h = Math.max(box.offsetHeight, 35);
+        const btn = btns[i];
+        if (btn) {
+          btn.style.width = bw + 'px';
+          btn.style.height = h + 'px';
+          btn.style.left = '0px';
+          btn.style.top = y + 'px';
+        }
+        y += h;
+      });
+    }
+
+    // Tidy any overlaps after a fresh render
+    function settleAll() {
+      stage.querySelectorAll('.box, .dl').forEach((el) => {
+        const p = placeMagnetic(el, el.offsetLeft, el.offsetTop, false);
+        el.style.left = p.x + 'px';
+        el.style.top = p.y + 'px';
+        if (el.classList.contains('box')) {
+          el._x = p.x;
+          el._y = p.y;
+        }
+      });
+    }
+
+    // Keep a free-floating element inside the stage
+    function clampPos(x, y, el) {
+      const maxX = Math.max(0, stage.clientWidth - el.offsetWidth);
+      return {
+        x: Math.max(0, Math.min(Math.round(x), maxX)),
+        y: Math.max(0, Math.round(y))
+      };
+    }
+
+    // Make any element draggable. Pass a unique id so its position is remembered.
+    // A short press still counts as a click; only real movement drags.
+    function attachDrag(el, id) {
+      let start = null;
+      let moved = false;
+
+      el.addEventListener('pointerdown', (e) => {
+        if (state.locked) return;
+        const r = el.getBoundingClientRect();
+        start = { px: e.clientX, py: e.clientY, offX: e.clientX - r.left, offY: e.clientY - r.top };
+        moved = false;
+        el.setPointerCapture(e.pointerId);
+      });
+
+      el.addEventListener('pointermove', (e) => {
+        if (!start) return;
+        if (!moved && Math.hypot(e.clientX - start.px, e.clientY - start.py) < 5) return;
+        if (!moved) {
+          el.classList.add('dragging');
+          state.auto = false;
+        }
+        moved = true;
+        const sr = stage.getBoundingClientRect();
+        const pos = placeMagnetic(el, e.clientX - sr.left - start.offX, e.clientY - sr.top - start.offY, true);
+        el.style.left = pos.x + 'px';
+        el.style.top = pos.y + 'px';
+      });
+
+      function end() {
+        if (!start) return;
+        el.classList.remove('dragging');
+        if (moved) {
+          state.layout[id] = { x: parseInt(el.style.left, 10), y: parseInt(el.style.top, 10) };
+          save();
+          // Swallow the click that follows a drag, then re-arm clicks
+          el.dataset.justDragged = '1';
+          setTimeout(() => delete el.dataset.justDragged, 300);
+        }
+        start = null;
+      }
+      el.addEventListener('pointerup', end);
+      el.addEventListener('pointercancel', end);
+
+      el.addEventListener('click', (e) => {
+        if (el.dataset.justDragged) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      }, true);
+    }
+
+    // Build a .txt file from the list's current order and text, then download it
+    function downloadList(index) {
+      const box = stage.querySelectorAll('.box')[index];
+      if (!box) return;
+      const names = [...box.querySelectorAll('.text')]
+        .map((t) => t.textContent.trim().toUpperCase())
+        .filter((n) => n.length > 0);
+      const date = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+      const content = names.join('\n') + '\n\n' + date + '\n' + FOOTER + '\n';
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = (LABELS[index] || ('AC-' + (index + 1) + ' K5')) + '.txt';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function makeDownloadButton(index) {
+      const btn = document.createElement('button');
+      btn.className = 'dl';
+      btn.type = 'button';
+      btn.textContent = LABELS[index] || ('AC-' + (index + 1) + ' K5');
+      btn.addEventListener('click', () => downloadList(index));
+      return btn;
+    }
+
+    // Once every word is red, reveal the download buttons over their lists
+    function checkAllDone() {
+      const pending = [...stage.querySelectorAll('.text')]
+        .filter((t) => !t.dataset.done && t.textContent.trim().length > 0).length;
+      if (pending === 0) {
+        stage.querySelectorAll('.dl').forEach((btn) => btn.classList.add('ready'));
+      }
+      updateLockButton();
+    }
+
+    // The lock can only be opened once every word is red
+    function allWordsDone() {
+      const words = [...stage.querySelectorAll('.text')].filter((t) => t.textContent.trim().length > 0);
+      return words.length > 0 && words.every((t) => t.dataset.done);
+    }
+
+    function updateLockButton() {
+      const done = allWordsDone();
+      if (!done) state.locked = true;
+      lockBtn.disabled = !done;
+      applyLock();
+    }
+
+    function render() {
+      stage.innerHTML = '';
+      setPages(state.pages || 1);
+      state.boxes.forEach((b) => stage.appendChild(makeBox(b)));
+      fitFontSize();
+      state.boxes.forEach((_, i) => stage.appendChild(makeDownloadButton(i)));
+      autoLayout();
+      syncButtonHeights();
+      layoutAll();
+      fitStageHeight();
+      document.body.classList.toggle('locked', state.locked);
+      lockBtn.textContent = state.locked ? 'unlock' : 'lock';
+    }
+
+    stage.addEventListener('pointermove', (e) => {
+      if (!dragEntry) return;
+      const boxes = [...stage.querySelectorAll('.box')];
+
+      // Pick the box under the pointer, or the nearest one if none
+      let target = boxes.find((box) => {
+        const r = box.getBoundingClientRect();
+        return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      });
+      if (!target) {
+        let best = Infinity;
+        for (const box of boxes) {
+          const r = box.getBoundingClientRect();
+          const d = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+          if (d < best) {
+            best = d;
+            target = box;
+          }
+        }
+      }
+      if (!target) return;
+
+      const entriesEl = target.querySelector('.entries');
+      const others = [...entriesEl.children].filter((el) => el !== dragEntry);
+      if (!others.length) {
+        entriesEl.appendChild(dragEntry);
+        return;
+      }
+
+      let nearest = null;
+      let best = Infinity;
+      for (const el of others) {
+        const r = el.getBoundingClientRect();
+        const d = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+        if (d < best) {
+          best = d;
+          nearest = { el, cy: r.top + r.height / 2 };
+        }
+      }
+
+      if (e.clientY < nearest.cy) {
+        entriesEl.insertBefore(dragEntry, nearest.el);
+      } else {
+        entriesEl.insertBefore(dragEntry, nearest.el.nextSibling);
+      }
+    });
+
+    function endDrags() {
+      if (dragEntry) {
+        dragEntry.classList.remove('dragging');
+        dragEntry = null;
+        save();
+      }
+    }
+
+    stage.addEventListener('pointerup', endDrags);
+    stage.addEventListener('pointercancel', endDrags);
+
+    function applyLock() {
+      document.body.classList.toggle('locked', state.locked);
+      lockBtn.textContent = state.locked ? 'unlock' : 'lock';
+    }
+
+    lockBtn.addEventListener('click', () => {
+      if (!allWordsDone()) return;
+      state.locked = !state.locked;
+      save();
+      applyLock();
+    });
+
+    window.addEventListener('resize', () => {
+      fitFontSize();
+      autoLayout();
+      syncButtonHeights();
+      layoutAll();
+      fitStageHeight();
+    });
+
+
+    // Canvas and random glyphs for the falling letters
+    const rainCanvas = document.getElementById('rain');
+    const rctx = rainCanvas.getContext('2d');
+    const SCRIPTS = [
+      [0x0041, 0x005A], [0x0061, 0x007A], [0x0370, 0x03FF], [0x0400, 0x04FF], [0x0530, 0x058F],
+      [0x0590, 0x05FF], [0x0620, 0x064A], [0x0900, 0x097F], [0x0B80, 0x0BFF], [0x0E01, 0x0E3A],
+      [0x10A0, 0x10FF], [0x1200, 0x127F], [0x3041, 0x3096], [0x30A1, 0x30FA], [0x4E00, 0x4E7F],
+      [0xAC00, 0xAC7F]
+    ];
+    function randomGlyph() {
+      const [lo, hi] = SCRIPTS[Math.floor(Math.random() * SCRIPTS.length)];
+      return String.fromCodePoint(lo + Math.floor(Math.random() * (hi - lo + 1)));
+    }
+
+    // A constant stream of letters poured from above, wandering left or right.
+    // Each drop goes the same way as the last one 80% of the time.
+    const fallers = [];
+    const SPAWN_MS = 90;
+    const STEP = 14;
+    let nextSpawn = null;
+    let streamX = null;
+    let streamDir = 1;
+    // Half the size of the text on the page
+    function fallSize() {
+      const texts = [...document.querySelectorAll('.text')];
+      if (!texts.length) return 12;
+      const avg = texts.reduce((a, t) => a + parseFloat(getComputedStyle(t).fontSize), 0) / texts.length;
+      return avg / 2;
+    }
+    function spawnDrop() {
+      const mid = innerWidth / 2;
+      const limit = innerWidth * 0.1;
+      if (streamX === null) streamX = mid;
+      const dir = Math.random() < 0.8 ? streamDir : -streamDir;
+      streamX += dir * STEP;
+      let finalDir = dir;
+      if (streamX < mid - limit || streamX > mid + limit) {
+        streamX = Math.max(mid - limit, Math.min(mid + limit, streamX));
+        finalDir = -dir;
+      }
+      streamDir = finalDir;
+      fallers.push({ x: streamX, y: -20, v: 60, glyph: randomGlyph() });
+    }
+    function sizeRain() {
+      const dpr = window.devicePixelRatio || 1;
+      rainCanvas.width = innerWidth * dpr;
+      rainCanvas.height = innerHeight * dpr;
+      rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    function rainFrame(now) {
+      if (nextSpawn === null || now - nextSpawn > 1000) nextSpawn = now;
+      while (now >= nextSpawn) {
+        spawnDrop();
+        nextSpawn += SPAWN_MS;
+      }
+      const dt = rainFrame.last === undefined ? 0 : Math.min((now - rainFrame.last) / 1000, 0.05);
+      rainFrame.last = now;
+
+      rctx.clearRect(0, 0, innerWidth, innerHeight);
+      rctx.fillStyle = '#000000';
+      rctx.font = fallSize() + 'px Helvetica, Arial, sans-serif';
+      rctx.textAlign = 'center';
+      for (let i = fallers.length - 1; i >= 0; i--) {
+        const f = fallers[i];
+        f.v += 320 * dt; // accelerates as it falls, like poured water
+        f.y += f.v * dt;
+        if (f.y > innerHeight + 20) {
+          fallers.splice(i, 1);
+          continue;
+        }
+        rctx.fillText(f.glyph, f.x, f.y);
+      }
+      requestAnimationFrame(rainFrame);
+    }
+    sizeRain();
+    window.addEventListener('resize', sizeRain);
+    requestAnimationFrame(rainFrame);
+
+    render();
+    updateLockButton();
+  </script>
+</body>
+</html>
